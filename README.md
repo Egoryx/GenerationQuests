@@ -62,18 +62,18 @@ source venv/bin/activate
 3. Установите зависимости:
 Создайте файл requirements.txt со следующим содержимым:
 
-'''bash
+```bash
 streamlit
 openai
-'''
+```
 
 Затем выполните команду в терминале:
 
-'''bash
+```bash
 pip install -r requirements.txt
-'''
+```
 
-Запустите приложение:
+4. Запустите приложение:
 
 ```bash
 streamlit run QuestGen.py
