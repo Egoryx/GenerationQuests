@@ -66,6 +66,7 @@ source venv/bin/activate
 ```bash
 streamlit
 openai
+re
 ```
 
 Затем выполните команду в терминале:
