@@ -7,7 +7,7 @@ from openai import OpenAI
 
 def create_llm_prompt(genre: str, hero: str, goal: str) -> str:
     """
-    Final, most robust version of the prompt for maximum reliability.
+    Окончательная, наиболее надежная версия запроса для максимальной надежности.
     """
     prompt = f"""
 Ты — талантливый сценарист, который создаёт глубокие и нелинейные квесты для RPG в формате JSON.
@@ -48,7 +48,7 @@ def create_llm_prompt(genre: str, hero: str, goal: str) -> str:
 
 def generate_quest_with_caila(prompt: str) -> str:
     """
-    Sends a request to your API endpoint and returns the generated quest.
+    Отправляет запрос на вашу конечную точку API и возвращает сгенерированный квест..
     """
     try:
         api_key = st.session_state.get("api_key")
