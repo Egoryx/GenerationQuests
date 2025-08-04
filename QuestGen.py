@@ -7,7 +7,7 @@ from openai import OpenAI
 
 def create_llm_prompt(genre: str, hero: str, goal: str) -> str:
     """
-    Финальная, самая проработанная версия промпта для генерации длинных и разнообразных квестов.
+    Final, most robust version of the prompt for maximum reliability.
     """
     prompt = f"""
 Ты — талантливый сценарист, который создаёт глубокие и нелинейные квесты для RPG в формате JSON.
@@ -33,8 +33,7 @@ def create_llm_prompt(genre: str, hero: str, goal: str) -> str:
     "text": "основной_текст_сцены",
     "choices": [
         {{ "text": "текст_выбора_1", "next_scene": "id_сцены_1" }},
-        {{ "text": "текст_выбора_2", "next_scene": "id_сцены_2" }},
-        {{ "text": "текст_выбора_3", "next_scene": "id_сцены_3" }}
+        {{ "text": "текст_выбора_2", "next_scene": "id_сцены_2" }}
     ]
 }}
 
@@ -68,8 +67,7 @@ def generate_quest_with_caila(prompt: str) -> str:
         )
 
         content = completion.choices[0].message.content
-
-        # Improved JSON extraction logic
+        
         match = re.search(r'```json\n(.*?)\n```', content, re.DOTALL)
         if match:
             return match.group(1).strip()
@@ -91,11 +89,54 @@ def generate_quest_with_caila(prompt: str) -> str:
             end_index = max(last_brace, last_bracket)
             if end_index > start_index:
                 return content[start_index : end_index + 1].strip()
-
+        
         return content.strip()
 
     except Exception as e:
         return f'{{"error": "Произошла ошибка при вызове API", "details": "{str(e)}"}}'
+
+# --- НОВАЯ ФУНКЦИЯ ВАЛИДАЦИИ ---
+def validate_quest_logic(quest_data: list) -> list:
+    """
+    Проверяет логическую целостность квеста (наличие 'start', 'битые' ссылки и т.д.).
+    Возвращает список найденных текстовых ошибок.
+    """
+    errors = []
+    # Собираем все существующие ID сцен
+    scene_ids = {scene.get("scene_id") for scene in quest_data if scene.get("scene_id")}
+    
+    if not scene_ids:
+        errors.append("Квест не содержит ни одной сцены с 'scene_id'.")
+        return errors # Дальше проверять бессмысленно
+
+    # 1. Проверка наличия стартовой сцены
+    if "start" not in scene_ids:
+        errors.append("В квесте отсутствует обязательная стартовая сцена с 'scene_id': 'start'.")
+
+    referenced_ids = set()
+    
+    for i, scene in enumerate(quest_data):
+        scene_id = scene.get("scene_id")
+        if not scene_id:
+            errors.append(f"Сцена #{i+1} (без ID) не имеет 'scene_id'.")
+            continue
+
+        # 2. Проверка, что каждый выбор ведет в существующую сцену
+        choices = scene.get("choices", [])
+        for choice_num, choice in enumerate(choices):
+            next_scene = choice.get("next_scene")
+            if not next_scene:
+                errors.append(f"В сцене '{scene_id}' у выбора #{choice_num+1} отсутствует поле 'next_scene'.")
+            elif next_scene not in scene_ids:
+                errors.append(f"В сцене '{scene_id}' есть выбор, который ссылается на несуществующую сцену '{next_scene}'.")
+            referenced_ids.add(next_scene)
+
+    # 3. Проверка на наличие "изолированных" сцен, на которые нельзя попасть
+    unreachable_scenes = scene_ids - referenced_ids - {"start"}
+    if unreachable_scenes:
+        errors.append(f"Найдены изолированные сцены, на которые нет переходов: {', '.join(unreachable_scenes)}.")
+        
+    return errors
 
 # --- Основной веб-интерфейс Streamlit ---
 
@@ -113,10 +154,10 @@ goal = st.text_input("Цель квеста", placeholder="Например, н�
 
 st.header("2. Запустите генерацию")
 if st.button("✨ Сгенерировать квест!"):
-    if 'quest_data' in st.session_state:
-        del st.session_state['quest_data']
-    if 'current_scene_id' in st.session_state:
-        del st.session_state['current_scene_id']
+    # Сбрасываем состояние от предыдущих квестов
+    for key in ['quest_data', 'current_scene_id', 'quest_scenes_dict']:
+        if key in st.session_state:
+            del st.session_state[key]
 
     if not all([genre, hero, goal, st.session_state.get("api_key")]):
         st.warning("Пожалуйста, заполните все поля и введите API ключ.")
@@ -124,28 +165,48 @@ if st.button("✨ Сгенерировать квест!"):
         with st.spinner("Магия в действии... Модель пишет вашу историю..."):
             final_prompt = create_llm_prompt(genre, hero, goal)
             json_response = generate_quest_with_caila(final_prompt)
-
+            
             try:
                 quest_data = json.loads(json_response)
-
+                
+                # Приводим данные к единому формату (список сцен)
+                processed_quest_data = []
                 if isinstance(quest_data, dict):
                     if "error" in quest_data:
                         st.error(f"**Ошибка API:** {quest_data.get('details', 'Неизвестная ошибка')}")
                         st.stop()
                     else:
-                        st.session_state['quest_data'] = list(quest_data.values())
+                        processed_quest_data = list(quest_data.values())
                 else:
-                    st.session_state['quest_data'] = quest_data
+                    processed_quest_data = quest_data
                 
-                st.session_state['current_scene_id'] = 'start'
-                st.success("Квест успешно сгенерирован!")
+                # --- ВНЕДРЕНИЕ ВАЛИДАЦИИ ---
+                validation_errors = validate_quest_logic(processed_quest_data)
+                
+                if validation_errors:
+                    st.error("**Внимание! Модель сгенерировала квест с логическими ошибками:**")
+                    for error in validation_errors:
+                        st.warning(f"- {error}")
+                    st.info("Вы можете скачать JSON ниже и исправить его вручную, или попробовать сгенерировать квест заново.")
+                    # Сохраняем "сломанный" квест, чтобы его можно было скачать и изучить
+                    st.session_state['quest_data_broken'] = processed_quest_data
+
+                else:
+                    # Если ошибок нет, сохраняем квест для интерпретации
+                    st.session_state['quest_data'] = processed_quest_data
+                    
+                    # --- ОПТИМИЗАЦИЯ: Создаем словарь сцен один раз и сохраняем ---
+                    st.session_state['quest_scenes_dict'] = {scene["scene_id"]: scene for scene in processed_quest_data}
+                    st.session_state['current_scene_id'] = 'start'
+                    st.success("Квест успешно сгенерирован и прошел логическую проверку!")
 
             except json.JSONDecodeError:
-                st.error("Критическая ошибка: Модель вернула ответ в неверном формате, который не удалось исправить автоматически. Попробуйте сгенерировать снова или немного упростить запрос.")
+                st.error("Критическая ошибка: Модель вернула ответ в неверном формате, который не удалось исправить автоматически.")
                 st.code(json_response, language="text")
 
-# --- Блок для отображения и воспроизведения квеста ---
+# --- Блок для отображения и прохождения квеста ---
 
+# Проверяем, есть ли валидный квест для прохождения
 if 'quest_data' in st.session_state:
     st.header("3. Ваш готовый квест")
     st.download_button(
@@ -157,7 +218,8 @@ if 'quest_data' in st.session_state:
 
     st.header("4. Интерпретация квеста")
     
-    quest_scenes = {scene["scene_id"]: scene for scene in st.session_state['quest_data']}
+    # Получаем готовый словарь из состояния
+    quest_scenes = st.session_state.get('quest_scenes_dict', {})
     current_scene_id = st.session_state.get('current_scene_id', 'start')
 
     if current_scene_id in quest_scenes:
@@ -172,7 +234,6 @@ if 'quest_data' in st.session_state:
         st.subheader("Выберите ваше действие:")
 
         if current_scene.get('choices'):
-            # Динамически создаем колонки под количество выборов
             cols = st.columns(len(current_scene['choices']))
             for i, choice in enumerate(current_scene['choices']):
                 if cols[i].button(choice['text'], key=f"{current_scene_id}_{i}"):
@@ -186,3 +247,14 @@ if 'quest_data' in st.session_state:
         if st.button("Начать заново"):
             st.session_state['current_scene_id'] = 'start'
             st.rerun()
+
+# Блок для отображения "сломанного" квеста, чтобы его можно было скачать
+elif 'quest_data_broken' in st.session_state:
+     st.header("3. Сгенерированный квест (с ошибками)")
+     st.download_button(
+       label="📥 Скачать некорректный quest.json",
+       data=json.dumps(st.session_state['quest_data_broken'], indent=4, ensure_ascii=False).encode('utf-8'),
+       file_name="quest_with_errors.json",
+       mime="application/json"
+    )
+     st.json(st.session_state['quest_data_broken'])
