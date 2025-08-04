@@ -60,6 +60,7 @@ source venv/bin/activate
 ```
 
 3. Установите зависимости:
+   
 Создайте файл requirements.txt со следующим содержимым:
 
 ```bash
